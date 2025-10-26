@@ -1,2 +1,0 @@
-# AI Analytics Django App
-

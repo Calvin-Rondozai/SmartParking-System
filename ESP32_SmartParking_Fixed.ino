@@ -6,8 +6,8 @@
 const char* ssid = "Redmi Note 11 Pro";
 const char* password = "esskeetit";
 
-// Server Configuration - FIXED: Use the correct server IP
-const char* serverUrl = "http://10.187.189.47:8000/api/iot/";
+// Server Configuration - UPDATED TO CORRECT IP
+const char* serverUrl = "http://169.254.156.223:8000/api/iot/";
 const char* deviceId = "ESP32_DUAL_SENSOR_001";
 
 // Pin Configuration
@@ -45,7 +45,6 @@ bool slot2Booked = false;
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  
   Serial.println("=== ESP32 Booking LED Control Setup ===");
   
   // Initialize pins
@@ -64,9 +63,8 @@ void setup() {
   
   // Turn off all LEDs initially
   turnOffAllLEDs();
-  
   Serial.println("Pins initialized");
-
+  
   // Prime initial LED state
   delay(200);
   readSensors();
@@ -78,8 +76,8 @@ void setup() {
   
   if (wifiConnected) {
     registerDevice();
-    printFirmwareInfo();
-    printWiFiInfo();
+    printFirmwareInfo(); // NEW
+    printWiFiInfo(); // NEW
     Serial.println("ESP32 Booking LED Control initialized successfully!");
   } else {
     Serial.println("ESP32 initialized but WiFi connection failed!");
@@ -126,7 +124,6 @@ void connectToWiFi() {
   Serial.println(ssid);
   
   WiFi.begin(ssid, password);
-  
   int attempts = 0;
   const int maxAttempts = 30;
   
@@ -139,7 +136,7 @@ void connectToWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     wifiConnected = true;
     Serial.println("\n✅ WiFi connected successfully!");
-    printWiFiInfo();
+    printWiFiInfo(); // NEW
   } else {
     wifiConnected = false;
     Serial.println("\n❌ WiFi connection failed!");
@@ -165,20 +162,14 @@ void registerDevice() {
   String jsonString;
   serializeJson(doc, jsonString);
   
-  Serial.println("📡 Registering device...");
-  Serial.println("URL: " + url);
-  Serial.println("Payload: " + jsonString);
-  
   int httpResponseCode = http.POST(jsonString);
-  
-  // Enhanced error reporting
   Serial.printf("HTTP Response Code: %d\n", httpResponseCode);
+  
   if (httpResponseCode > 0) {
-    String response = http.getString();
-    Serial.println("Response: " + response);
     Serial.println("✅ Device registered successfully!");
   } else {
-    Serial.printf("❌ Device registration failed! Error: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.println("❌ Device registration failed!");
+    Serial.printf("Error: %s\n", http.errorToString(httpResponseCode).c_str());
   }
   
   http.end();
@@ -192,17 +183,12 @@ void checkActiveBookings() {
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
   
-  Serial.println("📋 Checking active bookings...");
-  Serial.println("URL: " + url);
-  
   int httpResponseCode = http.GET();
-  
-  // Enhanced error reporting
   Serial.printf("HTTP Response Code: %d\n", httpResponseCode);
   
   if (httpResponseCode > 0) {
     String response = http.getString();
-    Serial.println("Response: " + response);
+    Serial.println("📋 Checking active bookings...");
     
     StaticJsonDocument<1024> doc;
     DeserializationError error = deserializeJson(doc, response);
@@ -213,7 +199,6 @@ void checkActiveBookings() {
       
       if (doc.containsKey("bookings")) {
         JsonArray bookings = doc["bookings"];
-        
         for (JsonObject booking : bookings) {
           String spotNumber = booking["parking_spot"]["spot_number"];
           bool isActive = booking["is_active"];
@@ -230,23 +215,23 @@ void checkActiveBookings() {
       
       if (slot1Changed) {
         slot1Booked = newSlot1Booked;
-        Serial.print("🅰️  Slot 1 Booking: ");
+        Serial.print("🅰️ Slot 1 Booking: ");
         Serial.println(slot1Booked ? "🔵 BOOKED" : "🟢 Available");
         updateSlot1LEDs();
       }
       
       if (slot2Changed) {
         slot2Booked = newSlot2Booked;
-        Serial.print("🅱️  Slot 2 Booking: ");
+        Serial.print("🅱️ Slot 2 Booking: ");
         Serial.println(slot2Booked ? "🔵 BOOKED" : "🟢 Available");
         updateSlot2LEDs();
       }
     } else {
       Serial.println("❌ Failed to parse booking data");
-      Serial.println("Parse error: " + String(error.c_str()));
     }
   } else {
-    Serial.printf("❌ Failed to check bookings! Error: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.println("❌ Failed to check bookings");
+    Serial.printf("Error: %s\n", http.errorToString(httpResponseCode).c_str());
   }
   
   http.end();
@@ -255,30 +240,29 @@ void checkActiveBookings() {
 void readSensors() {
   float distance1 = getDistance(trigPin1, echoPin1);
   float distance2 = getDistance(trigPin2, echoPin2);
-
+  
   bool newSlot1Occupied = (distance1 < 10);
   if (newSlot1Occupied != slot1Occupied) {
     slot1Occupied = newSlot1Occupied;
-    Serial.print("🅰️  Slot 1: ");
+    Serial.print("🅰️ Slot 1: ");
     Serial.print(distance1);
     Serial.print("cm - ");
     Serial.println(slot1Occupied ? "🚗 Occupied" : "🟢 Empty");
     updateSlot1LEDs();
   }
-
+  
   bool newSlot2Occupied = (distance2 < 10);
   if (newSlot2Occupied != slot2Occupied) {
     slot2Occupied = newSlot2Occupied;
-    Serial.print("🅱️  Slot 2: ");
+    Serial.print("🅱️ Slot 2: ");
     Serial.print(distance2);
     Serial.print("cm - ");
     Serial.println(slot2Occupied ? "🚗 Occupied" : "🟢 Empty");
     updateSlot2LEDs();
   }
-
+  
   int irReading = digitalRead(irPin);
   bool newIrAlert = (irReading == LOW);
-  
   if (newIrAlert != irAlert) {
     irAlert = newIrAlert;
     Serial.print("🚨 IR Alert: ");
@@ -358,20 +342,14 @@ void sendSensorData() {
   String jsonString;
   serializeJson(doc, jsonString);
   
-  Serial.println("📡 Sending sensor data...");
-  Serial.println("URL: " + url);
-  Serial.println("Payload: " + jsonString);
-  
   int httpResponseCode = http.POST(jsonString);
-  
-  // Enhanced error reporting
   Serial.printf("HTTP Response Code: %d\n", httpResponseCode);
+  
   if (httpResponseCode > 0) {
-    String response = http.getString();
-    Serial.println("Response: " + response);
     Serial.println("✅ Sensor data sent!");
   } else {
-    Serial.printf("❌ Sensor data failed! Error: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.println("❌ Sensor data failed!");
+    Serial.printf("Error: %s\n", http.errorToString(httpResponseCode).c_str());
   }
   
   http.end();
@@ -391,20 +369,14 @@ void sendHeartbeat() {
   String jsonString;
   serializeJson(doc, jsonString);
   
-  Serial.println("💓 Sending heartbeat...");
-  Serial.println("URL: " + url);
-  Serial.println("Payload: " + jsonString);
-  
   int httpResponseCode = http.POST(jsonString);
-  
-  // Enhanced error reporting
   Serial.printf("HTTP Response Code: %d\n", httpResponseCode);
+  
   if (httpResponseCode > 0) {
-    String response = http.getString();
-    Serial.println("Response: " + response);
     Serial.println("💓 Heartbeat sent!");
   } else {
-    Serial.printf("❌ Heartbeat failed! Error: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.println("❌ Heartbeat failed!");
+    Serial.printf("Error: %s\n", http.errorToString(httpResponseCode).c_str());
   }
   
   http.end();
@@ -416,15 +388,15 @@ float getDistance(int trigPin, int echoPin) {
   digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
-
+  
   long duration = pulseIn(echoPin, HIGH, 30000);
   if (duration == 0) return 999;
-
+  
   return duration * 0.034 / 2;
 }
 
 // ==============================
-// Firmware & WiFi Diagnostics
+// NEW: Firmware & WiFi Diagnostics
 // ==============================
 void printFirmwareInfo() {
   Serial.println("=== ESP32 Firmware & System Info ===");

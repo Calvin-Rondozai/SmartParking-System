@@ -14,6 +14,9 @@ from .models import (
 class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     balance = serializers.SerializerMethodField()
+    car_name = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
+    address = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -27,6 +30,9 @@ class UserSerializer(serializers.ModelSerializer):
             "is_superuser",
             "is_staff",
             "balance",
+            "car_name",
+            "phone",
+            "address",
         ]
 
     def get_full_name(self, obj):
@@ -45,11 +51,29 @@ class UserSerializer(serializers.ModelSerializer):
         except Exception:
             return 0.0
 
+    def get_car_name(self, obj):
+        try:
+            return obj.profile.car_name
+        except Exception:
+            return None
+
+    def get_phone(self, obj):
+        try:
+            return obj.profile.phone
+        except Exception:
+            return None
+
+    def get_address(self, obj):
+        try:
+            return obj.profile.address
+        except Exception:
+            return None
+
 
 class UserProfileSerializer(serializers.ModelSerializer):
     phone_number = serializers.CharField(source="phone", read_only=True)
     license_plate = serializers.CharField(source="address", read_only=True)
-    car_name = serializers.CharField(source="address", read_only=True)
+    car_name = serializers.CharField(read_only=True)
 
     class Meta:
         model = UserProfile

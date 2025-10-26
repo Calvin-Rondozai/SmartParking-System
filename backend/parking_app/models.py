@@ -268,6 +268,9 @@ class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     phone = models.CharField(max_length=20, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
+    car_name = models.CharField(
+        max_length=50, blank=True, null=True, help_text="Driver's license number"
+    )
     profile_picture = models.ImageField(
         upload_to="profile_pics/", blank=True, null=True
     )

@@ -77,7 +77,7 @@ class AdminLogin {
         localStorage.setItem("adminToken", data.token);
         localStorage.setItem("adminUser", JSON.stringify(data.user));
 
-        this.showSuccess("Login successful! Redirecting...");
+        this.showSuccess("Authentication successful!");
 
         // Redirect to dashboard after a short delay
         setTimeout(() => {
@@ -85,7 +85,7 @@ class AdminLogin {
         }, 1000);
       } else {
         this.showError(
-          data.error || "Login failed. Please check your credentials."
+          data.error || "Authentication failed. Please check your credentials."
         );
       }
     } catch (error) {

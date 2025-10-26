@@ -10,6 +10,7 @@ urlpatterns = [
     path("auth/profile/", views.get_user_profile, name="get_profile"),
     path("auth/profile/update/", views.update_user_profile, name="update_profile"),
     path("auth/change-password/", views.change_password, name="change_password"),
+    path("auth/forgot-password/", views.forgot_password, name="forgot_password"),
     path("auth/reset-password/", views.reset_password, name="reset_password"),
     # Parking lot endpoints
     path("parking-lots/", views.ParkingLotList.as_view(), name="parking_lot_list"),
@@ -121,4 +122,9 @@ urlpatterns = [
     # Admin reports endpoints
     path("admin/reports/", views.submit_user_report, name="submit_user_report"),
     path("admin/reports/list/", views.get_admin_reports, name="get_admin_reports"),
+    path(
+        "admin/reports/<int:report_id>/resolve/",
+        views.resolve_user_report,
+        name="resolve_user_report",
+    ),
 ]

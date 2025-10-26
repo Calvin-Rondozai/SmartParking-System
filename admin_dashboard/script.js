@@ -1285,23 +1285,62 @@ class SmartParkAdmin {
         : "bell";
     el.innerHTML = alerts
       .map((a) => {
-        const userLabel = a.user?.username || a.user?.email || "Anonymous";
+        const userLabel = a.user?.username || a.user?.email || "System";
+        const isUnauthorizedParking =
+          a.message && a.message.includes("UNAUTHORIZED PARKING DETECTED");
+        const isSystemAlert = a.type === "system_alert";
+
+        // Different styling for unauthorized parking alerts
+        const borderColor = isUnauthorizedParking
+          ? "#EF4444"
+          : isSystemAlert
+          ? "#F59E0B"
+          : "var(--primary-green)";
+        const iconBg = isUnauthorizedParking
+          ? "rgba(239,68,68,0.12)"
+          : isSystemAlert
+          ? "rgba(245,158,11,0.12)"
+          : "rgba(16,185,129,0.12)";
+        const iconColor = isUnauthorizedParking
+          ? "#EF4444"
+          : isSystemAlert
+          ? "#F59E0B"
+          : "var(--primary-green)";
+        const priorityColor =
+          a.priority === "high"
+            ? "#EF4444"
+            : a.priority === "medium"
+            ? "#F59E0B"
+            : "var(--primary-green)";
+
         return `
       <div class="alert-item ${
         a.type
-      }" style="background:white; border-radius:12px; box-shadow: var(--shadow-sm); padding:16px; margin:10px 0; display:flex; gap:12px; align-items:flex-start; border-left:4px solid var(--primary-green);">
-        <div class="alert-icon" style="width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; background: rgba(16,185,129,0.12); color: var(--primary-green);">
-          <i class="fas fa-${icon(a.type)}"></i>
+      }" style="background:white; border-radius:12px; box-shadow: var(--shadow-sm); padding:16px; margin:10px 0; display:flex; gap:12px; align-items:flex-start; border-left:4px solid ${borderColor}; ${
+          isUnauthorizedParking ? "animation: pulse 2s infinite;" : ""
+        }">
+        <div class="alert-icon" style="width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; background: ${iconBg}; color: ${iconColor};">
+          <i class="fas fa-${
+            isUnauthorizedParking ? "exclamation-triangle" : icon(a.type)
+          }"></i>
         </div>
         <div class="alert-content" style="flex:1;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h4 style="margin:0;">${a.title || "User Report"}</h4>
-            <span class="badge" style="background: var(--primary-green); color:white; padding:4px 8px; border-radius:12px; font-size:12px;">${
-              a.priority || "info"
-            }</span>
+            <h4 style="margin:0; ${
+              isUnauthorizedParking ? "color: #EF4444; font-weight: 700;" : ""
+            }">${
+          isUnauthorizedParking
+            ? "🚨 UNAUTHORIZED PARKING"
+            : a.title || "User Report"
+        }</h4>
+            <span class="badge" style="background: ${priorityColor}; color:white; padding:4px 8px; border-radius:12px; font-size:12px; font-weight: 600;">${
+          a.priority || "info"
+        }</span>
           </div>
           <div style="color: var(--gray); font-size:12px; margin-top:2px;">From: ${userLabel}</div>
-          <p style="margin:8px 0 0 0;">${a.message || ""}</p>
+          <p style="margin:8px 0 0 0; ${
+            isUnauthorizedParking ? "font-weight: 500; color: #374151;" : ""
+          }">${a.message || ""}</p>
           <div style="color: var(--gray); font-size:12px; margin-top:8px;">${new Date(
             a.created_at
           ).toLocaleString()}</div>
@@ -1310,6 +1349,11 @@ class SmartParkAdmin {
           <button class="btn btn-sm btn-outline" onclick="dashboard.viewReport(${
             a.id
           })">View</button>
+          ${
+            isUnauthorizedParking
+              ? `<button class="btn btn-sm" style="background: #EF4444; color: white; margin-left: 8px;" onclick="dashboard.resolveUnauthorizedParking('${a.id}')">Resolve</button>`
+              : ""
+          }
         </div>
       </div>`;
       })
@@ -1327,6 +1371,32 @@ class SmartParkAdmin {
       report.message || ""
     }`;
     alert(details);
+  }
+
+  async resolveUnauthorizedParking(alertId) {
+    try {
+      const response = await fetch(
+        `${this.apiBaseUrl}/admin/reports/${alertId}/resolve/`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Token ${this.token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 401) return this.logout();
+        throw new Error("Failed to resolve alert");
+      }
+
+      this.showNotification("Unauthorized parking alert resolved", "success");
+      await this.loadAlertsData(); // Refresh alerts
+    } catch (error) {
+      console.error("Error resolving unauthorized parking alert:", error);
+      this.showNotification("Failed to resolve alert", "error");
+    }
   }
 
   startAlertsTimers() {
@@ -1784,6 +1854,7 @@ class SmartParkAdmin {
             ${th("#", "id", "60px")}
             ${th("Name", "full_name")}
             ${th("Email", "email")}
+            ${th("License Number", "car_name", "140px")}
             ${th("Role", "role", "120px")}
             ${th("Active", "is_active", "100px")}
             ${th("Bookings", "total_bookings", "110px")}
@@ -1808,6 +1879,7 @@ class SmartParkAdmin {
                   <td>#${idx + 1}</td>
                   <td>${this.escapeHtml(u.full_name || "-")}</td>
                   <td>${this.escapeHtml(u.email || "-")}</td>
+                  <td>${this.escapeHtml(u.car_name || "-")}</td>
                   <td>${role}</td>
                   <td>${u.is_active ? "Yes" : "No"}</td>
                   <td>${u.total_bookings ?? 0}</td>
@@ -1911,10 +1983,19 @@ class SmartParkAdmin {
 
   exportUsersCSV() {
     const rows = [
-      ["Name", "Email", "Role", "Active", "Bookings", "Joined"],
+      [
+        "Name",
+        "Email",
+        "License Number",
+        "Role",
+        "Active",
+        "Bookings",
+        "Joined",
+      ],
       ...(this.getFilteredSortedUsers() || []).map((u) => [
         u.full_name || "-",
         u.email || "-",
+        u.car_name || "-",
         u.is_superuser ? "Superadmin" : u.is_staff ? "Staff" : "User",
         u.is_active ? "Yes" : "No",
         String(u.total_bookings ?? 0),
@@ -4738,6 +4819,7 @@ class SmartParkAdmin {
               <tr style="background: var(--light-gray);">
                 <th style="padding: 16px; text-align: left; border-bottom: 1px solid var(--gray); color: var(--dark-gray); font-weight: 600;">ID</th>
                 <th style="padding: 16px; text-align: left; border-bottom: 1px solid var(--gray); color: var(--dark-gray); font-weight: 600;">User</th>
+                <th style="padding: 16px; text-align: left; border-bottom: 1px solid var(--gray); color: var(--dark-gray); font-weight: 600;">License Number</th>
                 <th style="padding: 16px; text-align: left; border-bottom: 1px solid var(--gray); color: var(--dark-gray); font-weight: 600;">Number Plate</th>
                 <th style="padding: 16px; text-align: left; border-bottom: 1px solid var(--gray); color: var(--dark-gray); font-weight: 600;">Role</th>
                 <th style="padding: 16px; text-align: left; border-bottom: 1px solid var(--gray); color: var(--dark-gray); font-weight: 600;">Status</th>
@@ -4795,6 +4877,9 @@ class SmartParkAdmin {
             </div>
           </div>
         </td>
+        <td style="padding: 16px; color: var(--dark-gray);">${
+          user.car_name || "N/A"
+        }</td>
         <td style="padding: 16px; color: var(--dark-gray);">${(() => {
           const addr = user.address || "";
           if (!addr) return "N/A";
@@ -4914,17 +4999,7 @@ class SmartParkAdmin {
               </div>
               <div style="margin-bottom: 12px;">
                 <strong>License Number:</strong><br>
-                <span>${(() => {
-                  const value =
-                    user.car_name ??
-                    user.license_number ??
-                    (user.profile ? user.profile.car_name : "");
-                  const text =
-                    typeof value === "string"
-                      ? value.trim()
-                      : String(value || "").trim();
-                  return text || "Unavailable";
-                })()}</span>
+                <span>${user.car_name || "N/A"}</span>
               </div>
               <div style="margin-bottom: 12px;">
                 <strong>Number Plate:</strong><br>
@@ -4949,20 +5024,6 @@ class SmartParkAdmin {
               `
                   : ""
               }
-              <div style="margin-bottom: 12px;">
-                <strong>License Number:</strong><br>
-                <span>${(() => {
-                  const value =
-                    user.car_name ??
-                    user.license_number ??
-                    (user.profile ? user.profile.car_name : "");
-                  const text =
-                    typeof value === "string"
-                      ? value.trim()
-                      : String(value || "").trim();
-                  return text || "Unavailable";
-                })()}</span>
-              </div>
               ${
                 user.last_password_reset
                   ? `
@@ -6321,7 +6382,7 @@ class SmartParkAdmin {
                 user.car_name || ""
               }" placeholder="Enter license number" style="width: 100%; padding: 12px; border: 2px solid var(--light-gray); border-radius: 6px; font-size: 14px; font-family: monospace;">
             </div>
-
+            
             <div style="margin-bottom: 20px;">
               <label style="display: block; font-weight: 600; color: var(--dark-gray); margin-bottom: 8px;">Number Plate</label>
               <input type="text" id="editNumberPlate" value="${(() => {
@@ -6426,6 +6487,8 @@ class SmartParkAdmin {
     try {
       await this.updateUser(userId, userData);
       this.closeModal();
+      // Refresh the users data to show updated information
+      await this.loadUsersData();
     } catch (error) {
       console.error("Error updating user:", error);
     }

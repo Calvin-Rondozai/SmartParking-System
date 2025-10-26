@@ -6,7 +6,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.models import User
-from django.db import transaction
+from django.db import transaction, models
 from django.contrib.auth.hashers import make_password
 from .models import (
     ParkingLot,
@@ -1198,7 +1198,52 @@ def update_user_profile(request):
         profile = UserProfile.objects.get(user=request.user)
         print(f"[update_user_profile] Found profile: {profile}")
 
-        # Update user data if provided
+        # Get profile data - support both flat and nested formats
+        profile_data = request.data.get("profile", {})
+        if not profile_data and request.data:
+            # If no "profile" key, check for direct fields (flat format)
+            profile_data = {
+                k: v
+                for k, v in request.data.items()
+                if k
+                in ["phone", "phone_number", "address", "license_plate", "car_name"]
+            }
+
+        print(f"[update_user_profile] Profile data to update: {profile_data}")
+
+        # Update profile fields
+        if "phone" in profile_data or "phone_number" in profile_data:
+            profile.phone = profile_data.get("phone") or profile_data.get(
+                "phone_number"
+            )
+            print(f"[update_user_profile] Updated phone: {profile.phone}")
+
+        if "address" in profile_data:
+            profile.address = profile_data["address"]
+            print(f"[update_user_profile] Updated address: {profile.address}")
+        elif "license_plate" in profile_data:
+            profile.address = profile_data["license_plate"]
+            print(
+                f"[update_user_profile] Updated license_plate as address: {profile.address}"
+            )
+
+        if "car_name" in profile_data:
+            profile.car_name = profile_data["car_name"]
+            print(f"[update_user_profile] Updated car_name: {profile.car_name}")
+
+        # Handle nested profile data if provided
+        profile_nested = request.data.get("profile", {})
+        if profile_nested and not profile_data:
+            profile_data = profile_nested
+            if "phone_number" in profile_data:
+                profile.phone = profile_data["phone_number"]
+            if "license_plate" in profile_data:
+                profile.address = profile_data["license_plate"]
+
+        profile.save()
+        print(f"[update_user_profile] Profile saved successfully")
+
+        # Handle nested user data if provided
         user_data = request.data.get("user", {})
         if user_data:
             if "first_name" in user_data:
@@ -1218,30 +1263,6 @@ def update_user_profile(request):
                     )
                 request.user.email = user_data["email"]
             request.user.save()
-
-        # Update profile data if provided
-        profile_data = request.data.get("profile", {})
-        print(f"[update_user_profile] Profile data: {profile_data}")
-        if profile_data:
-            if "phone_number" in profile_data:
-                profile.phone = profile_data["phone_number"]
-                print(
-                    f"[update_user_profile] Updated phone: {profile_data['phone_number']}"
-                )
-            if "license_plate" in profile_data:
-                profile.address = profile_data["license_plate"]
-                print(
-                    f"[update_user_profile] Updated address/license_plate: {profile_data['license_plate']}"
-                )
-            if "car_name" in profile_data:
-                # Store car name in address field if no license plate
-                if not profile.address:
-                    profile.address = profile_data["car_name"]
-                    print(
-                        f"[update_user_profile] Updated address/car_name: {profile_data['car_name']}"
-                    )
-            profile.save()
-            print(f"[update_user_profile] Profile saved successfully")
 
         return Response(
             {
@@ -3107,6 +3128,7 @@ def get_all_users_admin(request):
                 profile = user.profile
                 phone = profile.phone if profile else None
                 address = profile.address if profile else None
+                car_name = profile.car_name if profile else None
                 last_password_reset = profile.last_password_reset if profile else None
                 wallet_balance = (
                     float(profile.balance) if profile and profile.balance else 0.0
@@ -3114,6 +3136,7 @@ def get_all_users_admin(request):
             except:
                 phone = None
                 address = None
+                car_name = None
                 last_password_reset = None
                 wallet_balance = 0.0
 
@@ -3126,6 +3149,7 @@ def get_all_users_admin(request):
                     "last_name": user.last_name or "",
                     "phone": phone,
                     "address": address,
+                    "car_name": car_name,
                     "is_active": user.is_active,
                     "is_staff": user.is_staff,
                     "is_superuser": user.is_superuser,
@@ -5199,6 +5223,123 @@ def detect_car_parked(request, booking_id):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+def forgot_password(request):
+    """Reset password using license number and number plate"""
+    try:
+        license_number = request.data.get("license_number", "").strip()
+        number_plate = request.data.get("number_plate", "").strip()
+        new_password = request.data.get("new_password", "")
+
+        print(
+            f"[FORGOT_PASSWORD] Request data: license={license_number}, plate={number_plate}"
+        )
+
+        # Validate required fields
+        if not all([license_number, number_plate, new_password]):
+            print("[FORGOT_PASSWORD] Missing required fields")
+            return Response(
+                {
+                    "error": "License number, number plate, and new password are required"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate password length
+        if len(new_password) < 6:
+            print(f"[FORGOT_PASSWORD] Password too short: {len(new_password)}")
+            return Response(
+                {"error": "Password must be at least 6 characters long"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Find user by license number (car_name) and number plate (address)
+        try:
+            from .models import UserProfile
+
+            print(
+                f"[FORGOT_PASSWORD] Searching for profile with car_name='{license_number}' and address containing '{number_plate}'"
+            )
+
+            # Search for profile with matching license number
+            try:
+                profile = UserProfile.objects.get(car_name__iexact=license_number)
+                print(
+                    f"[FORGOT_PASSWORD] Found profile with car_name: {profile.car_name}"
+                )
+                print(f"[FORGOT_PASSWORD] Profile address: {profile.address}")
+
+                # Check if number plate matches the address (case insensitive)
+                if profile.address and number_plate.lower() in profile.address.lower():
+                    user = profile.user
+                    print(
+                        f"[FORGOT_PASSWORD] Found matching user: {user.username} (ID: {user.id})"
+                    )
+                else:
+                    print(
+                        f"[FORGOT_PASSWORD] Number plate '{number_plate}' not found in address '{profile.address}'"
+                    )
+                    return Response(
+                        {
+                            "error": "No user found with this license number and number plate combination"
+                        },
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+            except UserProfile.DoesNotExist:
+                print(
+                    f"[FORGOT_PASSWORD] No profile found with car_name='{license_number}'"
+                )
+                return Response(
+                    {
+                        "error": "No user found with this license number and number plate combination"
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        except Exception as e:
+            print(f"[FORGOT_PASSWORD] Error finding user: {str(e)}")
+            return Response(
+                {
+                    "error": "No user found with this license number and number plate combination"
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Update password
+        print(f"[FORGOT_PASSWORD] Updating password for user {user.username}")
+        user.set_password(new_password)
+        user.save()
+        print(
+            f"[FORGOT_PASSWORD] Password updated successfully for user {user.username}"
+        )
+
+        # Invalidate any existing tokens for this user
+        try:
+            from rest_framework.authtoken.models import Token
+
+            Token.objects.filter(user=user).delete()
+            print(f"[FORGOT_PASSWORD] Invalidated tokens for user {user.username}")
+        except Exception as e:
+            print(f"[FORGOT_PASSWORD] Warning: Could not invalidate tokens: {e}")
+
+        return Response(
+            {
+                "message": "Password reset successful. You can now sign in with your new password.",
+                "user_id": user.id,
+                "username": user.username,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as e:
+        print(f"[FORGOT_PASSWORD] Unexpected error: {str(e)}")
+        return Response(
+            {"error": f"Password reset failed: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
 def reset_password(request):
     """Reset password by verifying full name and email, then setting new password"""
     try:
@@ -5245,7 +5386,7 @@ def reset_password(request):
             )
 
         # Update password
-        user.password = make_password(new_password)
+        user.set_password(new_password)
         user.save()
 
         return Response(
@@ -6687,6 +6828,34 @@ def submit_user_report(request):
         print(f"Error processing user report: {e}")
         return Response(
             {"error": "Failed to submit report"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def resolve_user_report(request, report_id):
+    """Resolve a user report (mark as resolved)"""
+    try:
+        report = UserReport.objects.get(id=report_id)
+        report.status = "resolved"
+        report.save()
+
+        print(f"✅ REPORT RESOLVED: id={report.id}, type={report.type}")
+
+        return Response(
+            {"message": "Report resolved successfully"},
+            status=status.HTTP_200_OK,
+        )
+    except UserReport.DoesNotExist:
+        return Response(
+            {"error": "Report not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    except Exception as e:
+        print(f"Error resolving report: {e}")
+        return Response(
+            {"error": "Failed to resolve report"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 

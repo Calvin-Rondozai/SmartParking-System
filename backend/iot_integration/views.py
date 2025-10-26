@@ -22,6 +22,8 @@ def check_unauthorized_parking(spot):
     """Check if someone parked without a booking and create admin alert"""
     try:
         from parking_app.models import Booking
+        from django.utils import timezone
+        from datetime import timedelta
 
         # Check if there's an active booking for this spot
         active_booking = Booking.objects.filter(
@@ -29,21 +31,34 @@ def check_unauthorized_parking(spot):
         ).first()
 
         if not active_booking:
-            # No active booking found - this is unauthorized parking
-            alert_message = f"🚨 UNAUTHORIZED PARKING DETECTED: Car parked in {spot.spot_number} without a booking. Immediate attention required!"
-
-            # Create admin alert
-            UserReport.objects.create(
-                user=None,  # System alert
-                message=alert_message,
+            # Check if we already created an alert for this spot recently (within last 5 minutes)
+            # to avoid spam alerts
+            recent_alert = UserReport.objects.filter(
+                message__icontains=f"UNAUTHORIZED PARKING DETECTED: Car parked in {spot.spot_number}",
                 type="system_alert",
-                priority="high",
-                status="pending",
-            )
+                created_at__gte=timezone.now() - timedelta(minutes=5),
+            ).first()
 
-            print(
-                f"🚨 UNAUTHORIZED PARKING ALERT: {spot.spot_number} occupied without booking"
-            )
+            if not recent_alert:
+                # No active booking found - this is unauthorized parking
+                alert_message = f"🚨 UNAUTHORIZED PARKING DETECTED: Car parked in {spot.spot_number} without a booking. Immediate attention required! Location: {spot.parking_lot.name if spot.parking_lot else 'Unknown'}"
+
+                # Create admin alert
+                UserReport.objects.create(
+                    user=None,  # System alert
+                    message=alert_message,
+                    type="system_alert",
+                    priority="high",
+                    status="pending",
+                )
+
+                print(
+                    f"🚨 UNAUTHORIZED PARKING ALERT: {spot.spot_number} occupied without booking at {timezone.now()}"
+                )
+            else:
+                print(
+                    f"⚠️  Unauthorized parking alert already exists for {spot.spot_number} (created {recent_alert.created_at})"
+                )
 
     except Exception as e:
         print(f"Error checking unauthorized parking: {e}")
